@@ -154,7 +154,8 @@ def make_audio(scenes):
     return paths
 
 
-def duration(path):    out = run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+def duration(path):    
+    out = run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                "-of", "default=nw=1:nk=1", str(path)])
     return float(out.strip())
 
