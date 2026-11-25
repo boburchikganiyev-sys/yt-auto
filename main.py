@@ -174,6 +174,22 @@ def _license_ok(lic):
     return any(k in l for k in ("public domain", "cc0", "cc by", "cc-by", "pd"))
 
 
+def wiki_get(url, params=None, timeout=60):
+    """Wikimedia 429 bersa kutib, qayta uriniladi."""
+    for attempt in range(6):
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+        if r.status_code in (429, 503):
+            wait = r.headers.get("Retry-After", "")
+            wait = int(wait) if wait.isdigit() else 5 * (2 ** attempt)
+            log(f"Wikimedia {r.status_code}, {min(wait, 60)} soniya kutaman")
+            time.sleep(min(wait, 60))
+            continue
+        r.raise_for_status()
+        return r
+    r.raise_for_status()
+    return r
+
+
 def commons_search(query, used_urls):
     params = {
         "action": "query", "format": "json", "generator": "search",
@@ -181,7 +197,7 @@ def commons_search(query, used_urls):
         "prop": "imageinfo", "iiprop": "url|mime|size|extmetadata", "iiurlwidth": 1920,
     }
     try:
-        r = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=40)
+        r = wiki_get(WIKI_API, params=params, timeout=40)
         r.raise_for_status()
         pages = r.json().get("query", {}).get("pages", {})
     except Exception as e:
@@ -211,12 +227,12 @@ def fetch_image(query, topic, idx, used_urls):
     attempts = [query, " ".join(words[:3]), " ".join(words[:2]), topic]
     for q in dict.fromkeys(a for a in attempts if a.strip()):
         found = commons_search(q, used_urls)
-        time.sleep(1)
+        time.sleep(3)
         if not found:
             continue
         url, credit = found
         try:
-            r = requests.get(url, headers=HEADERS, timeout=60)
+            r = wiki_get(url, timeout=60)
             r.raise_for_status()
             if len(r.content) < 20000:
                 continue
