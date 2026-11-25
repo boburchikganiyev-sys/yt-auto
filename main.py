@@ -19,8 +19,7 @@ DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
 PRIVACY = os.environ.get("PRIVACY", "private")
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get(gemini-3.5-flash-lite")
-
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 VOICE = os.environ.get("TTS_VOICE", "es-MX-JorgeNeural")
 RATE = "+8%" if MODE == "short" else "+0%"
 
