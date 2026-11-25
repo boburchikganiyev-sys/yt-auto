@@ -64,22 +64,28 @@ def save_used(used, topic):
 
 
 def gemini_json(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    models = [GEMINI_MODEL, "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-2.5-flash"]
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 1.0},
+        "generationConfig": {"responseMimeType": "application/json"},
     }
     last = None
-    for attempt in range(4):
-        try:
-            r = requests.post(url, params={"key": GEMINI_KEY}, json=body, timeout=180)
-            r.raise_for_status()
-            text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text)
-        except Exception as e:
-            last = e
-            log(f"Gemini urinish {attempt + 1} muvaffaqiyatsiz: {e}")
-            time.sleep(8 * (attempt + 1))
+    for round_no in range(3):
+        for m in dict.fromkeys(models):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            try:
+                r = requests.post(url, params={"key": GEMINI_KEY}, json=body, timeout=180)
+                if r.status_code != 200:
+                    log(f"Gemini {m} -> HTTP {r.status_code}: {r.text[:300]}")
+                    last = RuntimeError(f"{m}: HTTP {r.status_code}")
+                    continue
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                log(f"Gemini ishladi: {m}")
+                return json.loads(text)
+            except Exception as e:
+                last = e
+                log(f"Gemini {m} xato: {e}")
+        time.sleep(20)
     raise RuntimeError(f"Gemini javob bermadi: {last}")
 
 
