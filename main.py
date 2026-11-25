@@ -249,3 +249,117 @@ def make_clip(img, audio, dur, out):
     ])
 
 
+def build_video(data):
+    scenes = data["scenes"]
+    audios = make_audio(scenes)
+    used_urls, credits, clips = set(), [], []
+    prev_img = None
+    for i, (s, a) in enumerate(zip(scenes, audios)):
+        img, credit = fetch_image(s.get("image_query", data["topic"]), data["topic"], i, used_urls)
+        if img is None:
+            img = prev_img or blank_image(WORK / "blank.png")
+            log(f"Sahna {i}: rasm topilmadi, oldingisi ishlatildi")
+        else:
+            prev_img = img
+            credits.append(credit)
+        dur = duration(a) + 0.5
+        clip = WORK / f"clip{i}.mp4"
+        make_clip(img, a, dur, clip)
+        clips.append(clip)
+        log(f"Sahna {i + 1}/{len(scenes)} tayyor ({dur:.1f}s)")
+
+    lst = WORK / "list.txt"
+    lst.write_text("".join(f"file '{c.resolve()}'\n" for c in clips), encoding="utf-8")
+    joined = WORK / "joined.mp4"
+    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(joined)])
+
+    OUT.mkdir(exist_ok=True)
+    final = OUT / "video.mp4"
+    if MUSIC.exists():
+        run([
+            "ffmpeg", "-y", "-i", str(joined), "-stream_loop", "-1", "-i", str(MUSIC),
+            "-filter_complex", "[1:a]volume=0.10[m];[0:a][m]amix=inputs=2:duration=first,volume=2[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
+            str(final),
+        ])
+    else:
+        joined.replace(final)
+    return final, credits
+
+
+def upload(video, data, credits):
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
+
+    creds = Credentials(
+        None,
+        refresh_token=os.environ["YT_REFRESH_TOKEN"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ["YT_CLIENT_ID"],
+        client_secret=os.environ["YT_CLIENT_SECRET"],
+        scopes=["https://www.googleapis.com/auth/youtube.upload"],
+    )
+    yt = build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+    title = data["title"][:100]
+    if MODE == "short" and "#shorts" not in title.lower() and len(title) <= 91:
+        title += " #Shorts"
+    desc = data.get("description", "") + "\n\n"
+    if MODE == "short":
+        desc += "#Shorts #Historia\n\n"
+    desc += "Narración generada con voz sintética (IA).\n\nImágenes: Wikimedia Commons\n"
+    desc += "\n".join(f"- {c}" for c in credits[:30])
+    tags, total = [], 0
+    for t in data.get("tags", []):
+        t = str(t)[:30]
+        if total + len(t) > 450:
+            break
+        tags.append(t)
+        total += len(t)
+
+    def attempt(synthetic):
+        status = {"privacyStatus": PRIVACY, "selfDeclaredMadeForKids": False}
+        if synthetic:
+            status["containsSyntheticMedia"] = True
+        body = {
+            "snippet": {"title": title, "description": desc[:4900], "tags": tags, "categoryId": "27",
+                        "defaultLanguage": "es", "defaultAudioLanguage": "es"},
+            "status": status,
+        }
+        media = MediaFileUpload(str(video), chunksize=-1, resumable=True, mimetype="video/mp4")
+        req = yt.videos().insert(part="snippet,status", body=body, media_body=media)
+        resp = None
+        while resp is None:
+            _, resp = req.next_chunk()
+        return resp
+
+    try:
+        resp = attempt(True)
+    except HttpError as e:
+        log("containsSyntheticMedia bilan xato, qayta urinish:", e)
+        resp = attempt(False)
+    log("YUKLANDI: https://youtu.be/" + resp["id"], "| holat:", PRIVACY)
+
+
+def main():
+    if not GEMINI_KEY:
+        sys.exit("GEMINI_API_KEY topilmadi (GitHub Secrets'ga qo'shing)")
+    WORK.mkdir(exist_ok=True)
+    used = load_used()
+    log(f"Rejim: {MODE} | dry_run={DRY_RUN} | privacy={PRIVACY}")
+    data = make_script(used)
+    log("Mavzu:", data.get("topic"), "|", data["title"])
+    video, credits = build_video(data)
+    log("Video tayyor:", video, f"({duration(video):.0f}s)")
+    if DRY_RUN:
+        log("DRY_RUN: YouTube'ga yuklanmadi. Videoni Actions > Artifacts'dan yuklab oling.")
+        return
+    upload(video, data, credits)
+    save_used(used, data.get("topic", data["title"]))
+
+
+if __name__ == "__main__":
+    main()
+    
