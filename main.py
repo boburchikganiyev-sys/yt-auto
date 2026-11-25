@@ -154,5 +154,96 @@ def make_audio(scenes):
     return paths
 
 
-def duration(path):
-    out = run(["ffprobe", "-v", "error", "-show_entries", "forma
+def duration(path):    out = run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+               "-of", "default=nw=1:nk=1", str(path)])
+    return float(out.strip())
+
+
+def _clean(s):
+    return re.sub(r"<[^>]+>", "", html.unescape(s or "")).strip()
+
+
+def _license_ok(lic):
+    l = lic.lower()
+    return any(k in l for k in ("public domain", "cc0", "cc by", "cc-by", "pd"))
+
+
+def commons_search(query, used_urls):
+    params = {
+        "action": "query", "format": "json", "generator": "search",
+        "gsrsearch": f"{query} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": 25,
+        "prop": "imageinfo", "iiprop": "url|mime|size|extmetadata", "iiurlwidth": 1920,
+    }
+    try:
+        r = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=40)
+        r.raise_for_status()
+        pages = r.json().get("query", {}).get("pages", {})
+    except Exception as e:
+        log("Commons qidiruv xatosi:", e)
+        return None
+    for p in sorted(pages.values(), key=lambda x: x.get("index", 999)):
+        ii = (p.get("imageinfo") or [None])[0]
+        if not ii or ii.get("mime") not in ("image/jpeg", "image/png"):
+            continue
+        if ii.get("width", 0) < 900 or ii.get("height", 0) < 600:
+            continue
+        meta = ii.get("extmetadata", {})
+        lic = _clean(meta.get("LicenseShortName", {}).get("value", ""))
+        if not _license_ok(lic):
+            continue
+        url = ii.get("thumburl") or ii.get("url")
+        if not url or url in used_urls:
+            continue
+        artist = _clean(meta.get("Artist", {}).get("value", "")) or "Autor desconocido"
+        credit = f"{artist[:80]} - {lic} - {ii.get('descriptionurl', '')}"
+        return url, credit
+    return None
+
+
+def fetch_image(query, topic, idx, used_urls):
+    words = query.split()
+    attempts = [query, " ".join(words[:3]), " ".join(words[:2]), topic]
+    for q in dict.fromkeys(a for a in attempts if a.strip()):
+        found = commons_search(q, used_urls)
+        time.sleep(1)
+        if not found:
+            continue
+        url, credit = found
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            if len(r.content) < 20000:
+                continue
+            ext = ".png" if url.lower().endswith(".png") else ".jpg"
+            path = WORK / f"img{idx}{ext}"
+            path.write_bytes(r.content)
+            used_urls.add(url)
+            return path, credit
+        except Exception as e:
+            log("Rasm yuklash xatosi:", e)
+    return None, None
+
+
+def blank_image(path):
+    run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x15151f:s={W}x{H}", "-frames:v", "1", str(path)])
+    return path
+
+
+def make_clip(img, audio, dur, out):
+    n = int(dur * FPS) + 1
+    vf = (
+        f"[0:v]split[a][b];"
+        f"[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:3[bg];"
+        f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,scale={W * 2}:{H * 2},"
+        f"zoompan=z='min(zoom+0.0005,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":d={n}:s={W}x{H}:fps={FPS},format=yuv420p[v]"
+    )
+    run([
+        "ffmpeg", "-y", "-i", str(img), "-i", str(audio),
+        "-filter_complex", vf, "-map", "[v]", "-map", "1:a",
+        "-af", "apad", "-t", f"{dur:.2f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
+        str(out),
+    ])
