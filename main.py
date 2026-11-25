@@ -247,3 +247,5 @@ def make_clip(img, audio, dur, out):
         "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
         str(out),
     ])
+
+
