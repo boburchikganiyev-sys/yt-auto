@@ -31,6 +31,8 @@ WORK = ROOT / "work"
 OUT = ROOT / "output"
 USED_FILE = ROOT / "used_topics.json"
 MUSIC = ROOT / "music.mp3"
+CLIPS_DIR = ROOT / "clips"
+PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
 
 WIKI_API = "https://commons.wikimedia.org/w/api.php"
 HEADERS = {"User-Agent": "yt-auto-history/1.0 (educational personal project)"}
@@ -119,6 +121,8 @@ QOIDALAR:
 - "image_query": Wikimedia Commons'da tarixiy rasm topish uchun 2-4 so'zli aniq qidiruv (inglizcha yoki
   ispancha), masalan "Battle of Lepanto painting", "Tenochtitlan map", "Registan Samarkand".
   Har sahnada boshqa rasm kerak bo'lsin.
+- "video_query": stok-video kutubxonasi uchun 2-3 so'zli INGLIZCHA umumiy qidiruv (aniq nom emas, manzara/vaziyat),
+  masalan "desert caravan", "ancient ruins", "sailing ship ocean", "medieval castle", "burning torch", "old map".
 
 Faqat quyidagi JSON'ni qaytar:
 {{
@@ -126,7 +130,7 @@ Faqat quyidagi JSON'ni qaytar:
  "title": "YouTube sarlavhasi, ispancha, qiziqarli, 70 belgigacha",
  "description": "2-3 gaplik ispancha tavsif",
  "tags": ["8-12 ta ispancha teg"],
- "scenes": [ {{"narration": "...", "image_query": "..."}} ]
+ "scenes": [ {{"narration": "...", "image_query": "...", "video_query": "..."}} ]
 }}"""
     data = gemini_json(prompt)
     scenes = [s for s in data.get("scenes", []) if isinstance(s, dict) and s.get("narration")]
@@ -282,24 +286,11 @@ def _motions(n):
     ]
 
 
-def make_clip(img, audio, dur, out, text="", idx=0):
-    seg_len = 3.0 if MODE == "short" else 4.0
-    k = max(1, round(dur / seg_len))
-    seg_frames = [int(dur * FPS / k)] * k
-    seg_frames[-1] += int(dur * FPS) - sum(seg_frames) + 1
-    parts = [f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:3[bg0];"
-             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg0];"
-             f"[bg0][fg0]overlay=(W-w)/2:(H-h)/2,scale={W * 2}:{H * 2},split={k}" +
-             "".join(f"[s{j}]" for j in range(k)) + ";"]
-    for j in range(k):
-        n = seg_frames[j]
-        z, x, y = _motions(n)[(idx * 2 + j) % 6]
-        parts.append(f"[s{j}]zoompan=z='{z}':x='{x}':y='{y}':d={n}:s={W}x{H}:fps={FPS}[m{j}];")
-    parts.append("".join(f"[m{j}]" for j in range(k)) + f"concat=n={k}:v=1:a=0[cat];")
-    grade = ("[cat]eq=contrast=1.08:saturation=0.9:gamma=0.97,"
+def _finish(src, text, dur, idx):
+    """Rang berish + donadorlik + subtitrlar + kirish/chiqish. Oxirgi yorliq: [v]."""
+    grade = (f"[{src}]eq=contrast=1.08:saturation=0.9:gamma=0.97,"
              "curves=r='0/0 0.5/0.54 1/1':b='0/0 0.5/0.46 1/1',"
              "vignette=PI/5,noise=alls=7:allf=t")
-    # subtitrlar
     chunks = _caption_chunks(text) if text else []
     cap_dir = WORK / f"caps{idx}"
     cap_dir.mkdir(exist_ok=True)
@@ -316,6 +307,85 @@ def make_clip(img, audio, dur, out, text="", idx=0):
                   f"x=(w-text_w)/2:y={ypos}:enable='between(t,{t0:.2f},{t0 + d:.2f})'")
         t0 += d
     grade += f",fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.25,format=yuv420p[v]"
+    return grade
+
+
+def make_video_clip(video, audio, dur, out, text="", idx=0):
+    """Haqiqiy harakatlanuvchi video (Flow yoki Pexels) + ovoz + subtitr."""
+    vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},setsar=1[base];"
+          + _finish("base", text, dur, idx))
+    run([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", str(video), "-i", str(audio),
+        "-filter_complex", vf, "-map", "[v]", "-map", "1:a",
+        "-af", "apad", "-t", f"{dur:.2f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
+        str(out),
+    ])
+
+
+def local_clips():
+    if not CLIPS_DIR.exists():
+        return []
+    return sorted(p for p in CLIPS_DIR.iterdir() if p.suffix.lower() in (".mp4", ".mov", ".webm", ".mkv"))
+
+
+def pexels_video(query, idx, used_ids):
+    """Pexels'dan bepul stok-video topadi. (yo'l, kredit) yoki (None, None)."""
+    if not PEXELS_KEY or not query:
+        return None, None
+    params = {"query": query, "per_page": 15, "orientation": "portrait" if MODE == "short" else "landscape"}
+    try:
+        r = requests.get("https://api.pexels.com/videos/search", params=params,
+                         headers={"Authorization": PEXELS_KEY}, timeout=40)
+        r.raise_for_status()
+        vids = r.json().get("videos", [])
+    except Exception as e:
+        log("Pexels qidiruv xatosi:", e)
+        return None, None
+    target = 1080
+    for v in vids:
+        if v["id"] in used_ids or v.get("duration", 0) < 4:
+            continue
+        files = [f for f in v.get("video_files", [])
+                 if f.get("file_type") == "video/mp4" and f.get("width") and f.get("height")]
+        if MODE == "short":
+            files = [f for f in files if f["height"] >= f["width"]]
+        else:
+            files = [f for f in files if f["width"] >= f["height"]]
+        files = [f for f in files if min(f["width"], f["height"]) >= 540]
+        if not files:
+            continue
+        files.sort(key=lambda f: abs(min(f["width"], f["height"]) - target))
+        try:
+            d = requests.get(files[0]["link"], timeout=120)
+            d.raise_for_status()
+            if len(d.content) < 50000:
+                continue
+            path = WORK / f"pexels{idx}.mp4"
+            path.write_bytes(d.content)
+            used_ids.add(v["id"])
+            return path, f"Video: Pexels ({v.get('user', {}).get('name', '')}) {v.get('url', '')}"
+        except Exception as e:
+            log("Pexels yuklash xatosi:", e)
+    return None, None
+
+
+def make_clip(img, audio, dur, out, text="", idx=0):
+    seg_len = 3.0 if MODE == "short" else 4.0
+    k = max(1, round(dur / seg_len))
+    seg_frames = [int(dur * FPS / k)] * k
+    seg_frames[-1] += int(dur * FPS) - sum(seg_frames) + 1
+    parts = [f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:3[bg0];"
+             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg0];"
+             f"[bg0][fg0]overlay=(W-w)/2:(H-h)/2,scale={W * 2}:{H * 2},split={k}" +
+             "".join(f"[s{j}]" for j in range(k)) + ";"]
+    for j in range(k):
+        n = seg_frames[j]
+        z, x, y = _motions(n)[(idx * 2 + j) % 6]
+        parts.append(f"[s{j}]zoompan=z='{z}':x='{x}':y='{y}':d={n}:s={W}x{H}:fps={FPS}[m{j}];")
+    parts.append("".join(f"[m{j}]" for j in range(k)) + f"concat=n={k}:v=1:a=0[cat];")
+    grade = _finish("cat", text, dur, idx)
     parts.append(grade)
     run([
         "ffmpeg", "-y", "-i", str(img), "-i", str(audio),
@@ -330,21 +400,36 @@ def make_clip(img, audio, dur, out, text="", idx=0):
 def build_video(data):
     scenes = data["scenes"]
     audios = make_audio(scenes)
-    used_urls, credits, clips = set(), [], []
+    used_urls, used_vids, credits, clips = set(), set(), [], []
     prev_img = None
+    mine = local_clips()
+    log(f"Qo'lda yuklangan (Flow) kadrlar: {len(mine)} | Pexels: {'yoqilgan' if PEXELS_KEY else 'kalit yoq'}")
     for i, (s, a) in enumerate(zip(scenes, audios)):
-        img, credit = fetch_image(s.get("image_query", data["topic"]), data["topic"], i, used_urls)
-        if img is None:
-            img = prev_img or blank_image(WORK / "blank.png")
-            log(f"Sahna {i}: rasm topilmadi, oldingisi ishlatildi")
-        else:
-            prev_img = img
-            credits.append(credit)
         dur = duration(a) + 0.5
         clip = WORK / f"clip{i}.mp4"
-        make_clip(img, a, dur, clip, s.get("narration", ""), i)
+        text = s.get("narration", "")
+        src = None
+        if i < len(mine):
+            src, kind = mine[i], "Flow kadri"
+        else:
+            src, credit = pexels_video(s.get("video_query", ""), i, used_vids)
+            kind = "Pexels video"
+            if src:
+                credits.append(credit)
+        if src:
+            make_video_clip(src, a, dur, clip, text, i)
+        else:
+            kind = "rasm"
+            img, credit = fetch_image(s.get("image_query", data["topic"]), data["topic"], i, used_urls)
+            if img is None:
+                img = prev_img or blank_image(WORK / "blank.png")
+                log(f"Sahna {i}: rasm topilmadi, oldingisi ishlatildi")
+            else:
+                prev_img = img
+                credits.append(credit)
+            make_clip(img, a, dur, clip, text, i)
         clips.append(clip)
-        log(f"Sahna {i + 1}/{len(scenes)} tayyor ({dur:.1f}s)")
+        log(f"Sahna {i + 1}/{len(scenes)} tayyor ({dur:.1f}s, {kind})")
 
     lst = WORK / "list.txt"
     lst.write_text("".join(f"file '{c.resolve()}'\n" for c in clips), encoding="utf-8")
@@ -387,7 +472,7 @@ def upload(video, data, credits):
     desc = data.get("description", "") + "\n\n"
     if MODE == "short":
         desc += "#Shorts #Historia\n\n"
-    desc += "Narración generada con voz sintética (IA).\n\nImágenes: Wikimedia Commons\n"
+    desc += "Narración generada con voz sintética (IA).\n\nImágenes: Wikimedia Commons / Vídeos: Pexels\n"
     desc += "\n".join(f"- {c}" for c in credits[:30])
     tags, total = [], 0
     for t in data.get("tags", []):
