@@ -251,19 +251,75 @@ def blank_image(path):
     return path
 
 
-def make_clip(img, audio, dur, out):
-    n = int(dur * FPS) + 1
-    vf = (
-        f"[0:v]split[a][b];"
-        f"[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:3[bg];"
-        f"[b]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];"
-        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,scale={W * 2}:{H * 2},"
-        f"zoompan=z='min(zoom+0.0005,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={n}:s={W}x{H}:fps={FPS},format=yuv420p[v]"
-    )
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def _caption_chunks(text):
+    """Matnni subtitr bo'laklariga bo'ladi (har bo'lak 2 qatorgacha)."""
+    max_chars = 20 if MODE == "short" else 38
+    words = text.split()
+    lines, cur = [], ""
+    for w in words:
+        if cur and len(cur) + 1 + len(w) > max_chars:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    if cur:
+        lines.append(cur)
+    return ["\n".join(lines[i:i + 2]) for i in range(0, len(lines), 2)]
+
+
+def _motions(n):
+    """Har xil kamera harakatlari (zoompan ifodalari). n = kadrlar soni."""
+    return [
+        ("1+0.28*on/%d" % n, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),            # yaqinlashish
+        ("1.28-0.28*on/%d" % n, "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"),         # uzoqlashish
+        ("1.25", "(iw-iw/zoom)*on/%d" % n, "ih/2-(ih/zoom/2)"),                  # chapdan o'ngga
+        ("1.25", "(iw-iw/zoom)*(1-on/%d)" % n, "ih/2-(ih/zoom/2)"),              # o'ngdan chapga
+        ("1+0.3*on/%d" % n, "0", "0"),                                           # yuqori-chapga yaqinlashish
+        ("1.25", "iw/2-(iw/zoom/2)", "(ih-ih/zoom)*on/%d" % n),                  # yuqoridan pastga
+    ]
+
+
+def make_clip(img, audio, dur, out, text="", idx=0):
+    seg_len = 3.0 if MODE == "short" else 4.0
+    k = max(1, round(dur / seg_len))
+    seg_frames = [int(dur * FPS / k)] * k
+    seg_frames[-1] += int(dur * FPS) - sum(seg_frames) + 1
+    parts = [f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=25:3[bg0];"
+             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg0];"
+             f"[bg0][fg0]overlay=(W-w)/2:(H-h)/2,scale={W * 2}:{H * 2},split={k}" +
+             "".join(f"[s{j}]" for j in range(k)) + ";"]
+    for j in range(k):
+        n = seg_frames[j]
+        z, x, y = _motions(n)[(idx * 2 + j) % 6]
+        parts.append(f"[s{j}]zoompan=z='{z}':x='{x}':y='{y}':d={n}:s={W}x{H}:fps={FPS}[m{j}];")
+    parts.append("".join(f"[m{j}]" for j in range(k)) + f"concat=n={k}:v=1:a=0[cat];")
+    grade = ("[cat]eq=contrast=1.08:saturation=0.9:gamma=0.97,"
+             "curves=r='0/0 0.5/0.54 1/1':b='0/0 0.5/0.46 1/1',"
+             "vignette=PI/5,noise=alls=7:allf=t")
+    # subtitrlar
+    chunks = _caption_chunks(text) if text else []
+    cap_dir = WORK / f"caps{idx}"
+    cap_dir.mkdir(exist_ok=True)
+    total_chars = sum(len(c) for c in chunks) or 1
+    t0 = 0.0
+    size = 70 if MODE == "short" else 48
+    ypos = "h*0.68" if MODE == "short" else "h*0.80"
+    for ci, c in enumerate(chunks):
+        d = max(0.8, (dur - 0.4) * len(c) / total_chars)
+        f = cap_dir / f"c{ci}.txt"
+        f.write_text(c, encoding="utf-8")
+        grade += (f",drawtext=fontfile={FONT}:textfile={f.resolve()}:fontsize={size}:fontcolor=white:"
+                  f"borderw=4:bordercolor=black:box=1:boxcolor=black@0.35:boxborderw=14:line_spacing=8:"
+                  f"x=(w-text_w)/2:y={ypos}:enable='between(t,{t0:.2f},{t0 + d:.2f})'")
+        t0 += d
+    grade += f",fade=t=in:st=0:d=0.25,fade=t=out:st={max(0.0, dur - 0.25):.2f}:d=0.25,format=yuv420p[v]"
+    parts.append(grade)
     run([
         "ffmpeg", "-y", "-i", str(img), "-i", str(audio),
-        "-filter_complex", vf, "-map", "[v]", "-map", "1:a",
+        "-filter_complex", "".join(parts), "-map", "[v]", "-map", "1:a",
         "-af", "apad", "-t", f"{dur:.2f}",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-r", str(FPS),
         "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
@@ -286,7 +342,7 @@ def build_video(data):
             credits.append(credit)
         dur = duration(a) + 0.5
         clip = WORK / f"clip{i}.mp4"
-        make_clip(img, a, dur, clip)
+        make_clip(img, a, dur, clip, s.get("narration", ""), i)
         clips.append(clip)
         log(f"Sahna {i + 1}/{len(scenes)} tayyor ({dur:.1f}s)")
 
