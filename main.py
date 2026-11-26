@@ -33,6 +33,7 @@ USED_FILE = ROOT / "used_topics.json"
 MUSIC = ROOT / "music.mp3"
 CLIPS_DIR = ROOT / "clips"
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY", "")
+PIXABAY_KEY = os.environ.get("PIXABAY_API_KEY", "")
 
 WIKI_API = "https://commons.wikimedia.org/w/api.php"
 HEADERS = {"User-Agent": "yt-auto-history/1.0 (educational personal project)"}
@@ -371,6 +372,49 @@ def pexels_video(query, idx, used_ids):
     return None, None
 
 
+def pixabay_video(query, idx, used_ids):
+    """Pixabay'dan bepul stok-video topadi. (yo'l, kredit) yoki (None, None)."""
+    if not PIXABAY_KEY or not query:
+        return None, None
+    params = {"key": PIXABAY_KEY, "q": query[:100], "video_type": "film", "per_page": 20,
+              "safesearch": "true", "min_width": 1280}
+    try:
+        r = requests.get("https://pixabay.com/api/videos/", params=params, timeout=40)
+        r.raise_for_status()
+        hits = r.json().get("hits", [])
+    except Exception as e:
+        log("Pixabay qidiruv xatosi:", e)
+        return None, None
+    for v in hits:
+        vid = "px%s" % v.get("id")
+        if vid in used_ids or v.get("duration", 0) < 4:
+            continue
+        rend = v.get("videos", {})
+        f = rend.get("medium") or rend.get("small")
+        if not f or not f.get("url") or f.get("size", 0) > 60_000_000:
+            continue
+        try:
+            d = requests.get(f["url"], timeout=180)
+            d.raise_for_status()
+            if len(d.content) < 50000:
+                continue
+            path = WORK / f"pixabay{idx}.mp4"
+            path.write_bytes(d.content)
+            used_ids.add(vid)
+            return path, f"Video: Pixabay ({v.get('user', '')}) {v.get('pageURL', '')}"
+        except Exception as e:
+            log("Pixabay yuklash xatosi:", e)
+    return None, None
+
+
+def stock_video(query, idx, used_ids):
+    for fn, name in ((pixabay_video, "Pixabay"), (pexels_video, "Pexels")):
+        path, credit = fn(query, idx, used_ids)
+        if path:
+            return path, credit, name
+    return None, None, None
+
+
 def make_clip(img, audio, dur, out, text="", idx=0):
     seg_len = 3.0 if MODE == "short" else 4.0
     k = max(1, round(dur / seg_len))
@@ -403,7 +447,7 @@ def build_video(data):
     used_urls, used_vids, credits, clips = set(), set(), [], []
     prev_img = None
     mine = local_clips()
-    log(f"Qo'lda yuklangan (Flow) kadrlar: {len(mine)} | Pexels: {'yoqilgan' if PEXELS_KEY else 'kalit yoq'}")
+    log(f"Qo'lda yuklangan (Flow) kadrlar: {len(mine)} | Pixabay: {'yoqilgan' if PIXABAY_KEY else 'kalit yoq'} | Pexels: {'yoqilgan' if PEXELS_KEY else 'kalit yoq'}")
     for i, (s, a) in enumerate(zip(scenes, audios)):
         dur = duration(a) + 0.5
         clip = WORK / f"clip{i}.mp4"
@@ -412,8 +456,8 @@ def build_video(data):
         if i < len(mine):
             src, kind = mine[i], "Flow kadri"
         else:
-            src, credit = pexels_video(s.get("video_query", ""), i, used_vids)
-            kind = "Pexels video"
+            src, credit, name = stock_video(s.get("video_query", ""), i, used_vids)
+            kind = f"{name} video"
             if src:
                 credits.append(credit)
         if src:
@@ -472,7 +516,7 @@ def upload(video, data, credits):
     desc = data.get("description", "") + "\n\n"
     if MODE == "short":
         desc += "#Shorts #Historia\n\n"
-    desc += "Narración generada con voz sintética (IA).\n\nImágenes: Wikimedia Commons / Vídeos: Pexels\n"
+    desc += "Narración generada con voz sintética (IA).\n\nImágenes: Wikimedia Commons / Vídeos: Pixabay/Pexels\n"
     desc += "\n".join(f"- {c}" for c in credits[:30])
     tags, total = [], 0
     for t in data.get("tags", []):
