@@ -1,0 +1,26 @@
+name: Cartoon (Rainbow Friends)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install edge-tts
+      - run: python cartoon/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rainbow_friends
+          path: cartoon/out/rainbow_friends.mp4
+      - name: Save result into repo
+        run: |
+          git config user.name "cartoon-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -f cartoon/out/rainbow_friends.mp4
+          git commit -m "Rainbow Friends: tayyor multfilm" || echo "no change"
+          git push
