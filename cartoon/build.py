@@ -22,12 +22,16 @@ LINES=[
 ]
 def run(c):
     r=subprocess.run(c,capture_output=True,text=True)
-    if r.returncode: print(r.stderr[-1500:]); sys.exit(1)
+    if r.returncode: print("CMD FAILED:"," ".join(c)[:400]); print(r.stderr[-1500:]); sys.exit(1)
     return r.stdout
 def dur(p): return float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",p]).strip())
 async def tts(text,path):
     import edge_tts
-    await edge_tts.Communicate(text,VOICE,rate="-4%",pitch="+8Hz").save(path)
+    try:
+        await edge_tts.Communicate(text,VOICE,rate="-4%",pitch="+8Hz").save(path)
+    except Exception as e:
+        print("TTS retry without pitch:",repr(e))
+        await edge_tts.Communicate(text,VOICE,rate="-4%").save(path)
 def main():
     segs=[]
     for i,line in enumerate(LINES,1):
