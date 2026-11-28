@@ -1,10 +1,16 @@
-Timeout (0:01:30)!
-Thread 0x00007a9f8f5ecb80 (most recent call first):
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/selectors.py", line 415 in select
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 2115 in _communicate
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 1209 in communicate
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 550 in run
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 26 in run
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 61 in main
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 72 in <module>
-CMD TIMEOUT: ffmpeg -v error -y -i /home/runner/work/yt-auto/yt-auto/cartoon/clips/01.mp4 -i /home/runner/work/yt-auto/yt-auto/cartoon/tmp/v01.mp3 -filter_complex [1:a]atempo=1.0697142857142858,adelay=400|400,volume=1.6[v];[0:a]volume=0.25[o];[o][v]amix=inputs=2:duration=first:normalize=0,apad,atrim=0:8,asetpts=N/SR/TB[a] -vf scale=1280:720,fps=24,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:textfile=/home/runner/work/yt-auto/yt-auto/cartoon/tmp/t01.txt:fontsize=40:fontcolor=white:borderw=4:bordercolor=black@0.8:x=(w-text_w)/2:y=h-text_h-40:line_spacing=8,format=yuv420p -map 0:v -
+ok 01 7.5 s voice
+ok 02 6.7 s voice
+ok 03 7.4 s voice
+ok 04 7.2 s voice
+ok 05 7.4 s voice
+ok 06 8.0 s voice
+ok 07 8.2 s voice
+ok 08 9.1 s voice
+ok 09 8.1 s voice
+ok 10 7.8 s voice
+ok 11 7.5 s voice
+ok 12 6.7 s voice
+ok 13 9.9 s voice
+ok 14 7.3 s voice
+ok 15 5.2 s voice
+DONE /home/runner/work/yt-auto/yt-auto/cartoon/out/rainbow_friends.mp4 120.0 s
