@@ -1,20 +1,10 @@
-Traceback (most recent call last):
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 64, in <module>
-    main()
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 44, in main
-    d=dur(mp3); tempo=1.0
-      ^^^^^^^^
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 27, in dur
-    def dur(p): return float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",p]).strip())
-                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 24, in run
-    r=subprocess.run(c,capture_output=True,text=True)
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 548, in run
-    with Popen(*popenargs, **kwargs) as process:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 1026, in __init__
-    self._execute_child(args, executable, preexec_fn, close_fds,
-  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 1955, in _execute_child
-    raise child_exception_type(errno_num, err_msg, err_filename)
-FileNotFoundError: [Errno 2] No such file or directory: 'ffprobe'
+Timeout (0:01:30)!
+Thread 0x00007a9f8f5ecb80 (most recent call first):
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/selectors.py", line 415 in select
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 2115 in _communicate
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 1209 in communicate
+  File "/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/subprocess.py", line 550 in run
+  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 26 in run
+  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 61 in main
+  File "/home/runner/work/yt-auto/yt-auto/cartoon/build.py", line 72 in <module>
+CMD TIMEOUT: ffmpeg -v error -y -i /home/runner/work/yt-auto/yt-auto/cartoon/clips/01.mp4 -i /home/runner/work/yt-auto/yt-auto/cartoon/tmp/v01.mp3 -filter_complex [1:a]atempo=1.0697142857142858,adelay=400|400,volume=1.6[v];[0:a]volume=0.25[o];[o][v]amix=inputs=2:duration=first:normalize=0,apad,atrim=0:8,asetpts=N/SR/TB[a] -vf scale=1280:720,fps=24,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:textfile=/home/runner/work/yt-auto/yt-auto/cartoon/tmp/t01.txt:fontsize=40:fontcolor=white:borderw=4:bordercolor=black@0.8:x=(w-text_w)/2:y=h-text_h-40:line_spacing=8,format=yuv420p -map 0:v -
