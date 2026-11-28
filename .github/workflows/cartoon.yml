@@ -19,7 +19,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p cartoon/out
-          python -u cartoon/build.py 2>&1 | tee cartoon/out/log.txt
+          timeout 480 python -u cartoon/build.py 2>&1 | tee cartoon/out/log.txt
       - uses: actions/upload-artifact@v4
         with:
           name: rainbow_friends

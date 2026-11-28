@@ -1,5 +1,6 @@
 """Rainbow Friends: clips + English kid voice (edge-tts) + music + subtitles -> out/rainbow_friends.mp4"""
-import asyncio, os, subprocess, sys, textwrap
+import asyncio, os, subprocess, sys, textwrap, faulthandler
+faulthandler.dump_traceback_later(90, repeat=True, file=sys.stdout)
 D=os.path.dirname(os.path.abspath(__file__)); OUT=os.path.join(D,"out"); TMP=os.path.join(D,"tmp")
 os.makedirs(OUT,exist_ok=True); os.makedirs(TMP,exist_ok=True)
 VOICE=os.environ.get("VOICE","en-US-AnaNeural")
@@ -21,7 +22,10 @@ LINES=[
 "Goodnight, rainbow friends. Sweet dreams!",
 ]
 def run(c):
-    r=subprocess.run(c,capture_output=True,text=True)
+    try:
+        r=subprocess.run(c,capture_output=True,text=True,timeout=120)
+    except subprocess.TimeoutExpired:
+        print("CMD TIMEOUT:"," ".join(c)[:600],flush=True); sys.exit(1)
     if r.returncode: print("CMD FAILED:"," ".join(c)[:400]); print(r.stderr[-1500:]); sys.exit(1)
     return r.stdout
 def dur(p): return float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",p]).strip())
