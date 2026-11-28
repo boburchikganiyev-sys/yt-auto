@@ -27,11 +27,15 @@ def run(c):
 def dur(p): return float(run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",p]).strip())
 async def tts(text,path):
     import edge_tts
-    try:
-        await edge_tts.Communicate(text,VOICE,rate="-4%",pitch="+8Hz").save(path)
-    except Exception as e:
-        print("TTS retry without pitch:",repr(e))
-        await edge_tts.Communicate(text,VOICE,rate="-4%").save(path)
+    last=None
+    for attempt in range(4):
+        try:
+            kw=dict(rate="-4%",pitch="+8Hz") if attempt<2 else dict(rate="-4%")
+            await asyncio.wait_for(edge_tts.Communicate(text,VOICE,**kw).save(path),timeout=40)
+            return
+        except Exception as e:
+            last=e; print("TTS attempt",attempt+1,"failed:",repr(e),flush=True)
+    raise last
 def main():
     segs=[]
     for i,line in enumerate(LINES,1):
